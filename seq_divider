@@ -1,0 +1,74 @@
+`timescale 1ns / 1ps
+module seq_divider #(
+    parameter WIDTH = 32
+)(
+    input  wire                 clk,
+    input  wire                 rst,
+    input  wire                 start,
+    input  wire [WIDTH-1:0]     dividend,
+    input  wire [WIDTH-1:0]     divisor,
+    output reg  [WIDTH-1:0]     quotient,
+    output reg  [WIDTH-1:0]     remainder,
+    output reg                  busy,
+    output reg                  done,
+    output reg                  div_by_zero
+);
+
+    reg [WIDTH:0] rem;
+    reg [WIDTH-1:0] dividend_reg;
+    reg [$clog2(WIDTH)-1:0] pos;
+    reg [WIDTH-1:0] q_reg;
+    reg [WIDTH:0] trial;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            busy <= 0;
+            done <= 0;
+            div_by_zero <= 0;
+            rem <= 0;
+            dividend_reg <= 0;
+            pos <= 0;
+            q_reg <= 0;
+            quotient <= 0;
+            remainder <= 0;
+        end else begin
+            done <= 0;
+            if (start && !busy) begin
+                if (divisor == 0) begin
+                    div_by_zero <= 1;
+                    quotient <= {WIDTH{1'b0}};
+                    remainder <= dividend;
+                    busy <= 0;
+                    done <= 1;
+                end else begin
+                    div_by_zero <= 0;
+                    rem <= 0;
+                    dividend_reg <= dividend;
+                    q_reg <= 0;
+                    pos <= WIDTH - 1;
+                    busy <= 1;
+                end
+            end else if (busy) begin
+                rem <= {rem[WIDTH-1:0], dividend_reg[WIDTH-1]};
+                dividend_reg <= {dividend_reg[WIDTH-2:0], 1'b0};
+
+                trial = rem - {1'b0, divisor};
+                if (!trial[WIDTH]) begin
+                    rem <= trial;
+                    q_reg[pos] <= 1'b1;
+                end else begin
+                    q_reg[pos] <= 1'b0;
+                end
+
+                if (pos == 0) begin
+                    busy <= 0;
+                    done <= 1;
+                    quotient <= q_reg;
+                    remainder <= rem[WIDTH-1:0];
+                end else begin
+                    pos <= pos - 1;
+                end
+            end
+        end
+    end
+endmodule

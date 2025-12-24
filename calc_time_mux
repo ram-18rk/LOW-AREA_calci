@@ -1,0 +1,137 @@
+`timescale 1ns / 1ps
+module calc_time_mux #(
+    parameter WIDTH = 32
+)(
+    input  wire                    clk,
+    input  wire                    rst,
+    input  wire                    start,
+    input  wire [1:0]              opcode,
+    input  wire [WIDTH-1:0]        a,
+    input  wire [WIDTH-1:0]        b,
+    output reg  [2*WIDTH-1:0]      result,
+    output reg                     busy,
+    output reg                     done,
+    output reg                     err_div_by_zero
+);
+
+    wire add_done, add_busy;
+    wire [WIDTH-1:0] add_res;
+    reg  start_add;
+
+    serial_addsub #(.WIDTH(WIDTH)) u_add (
+        .clk(clk),
+        .rst(rst),
+        .start(start_add),
+        .sub(opcode == 2'b01),
+        .a_par(a),
+        .b_par(b),
+        .result(add_res),
+        .busy(add_busy),
+        .done(add_done),
+        .carry_out()
+    );
+
+    wire mul_done, mul_busy;
+    wire [2*WIDTH-1:0] mul_prod;
+    reg start_mul;
+
+    serial_parallel_mul #(.WIDTH(WIDTH)) u_mul (
+        .clk(clk),
+        .rst(rst),
+        .start(start_mul),
+        .multiplicand(a),
+        .multiplier(b),
+        .product(mul_prod),
+        .busy(mul_busy),
+        .done(mul_done)
+    );
+
+    wire div_done, div_busy, div_dz;
+    wire [WIDTH-1:0] div_q;
+    reg start_div;
+
+    seq_divider #(.WIDTH(WIDTH)) u_div (
+        .clk(clk),
+        .rst(rst),
+        .start(start_div),
+        .dividend(a),
+        .divisor(b),
+        .quotient(div_q),
+        .remainder(),
+        .busy(div_busy),
+        .done(div_done),
+        .div_by_zero(div_dz)
+    );
+
+    localparam S_IDLE = 2'b00;
+    localparam S_RUN  = 2'b01;
+    localparam S_FIN  = 2'b10;
+
+    reg [1:0] state;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            state <= S_IDLE;
+            busy  <= 1'b0;
+            done  <= 1'b0;
+            result <= {2*WIDTH{1'b0}};
+            err_div_by_zero <= 1'b0;
+            start_add <= 1'b0;
+            start_mul <= 1'b0;
+            start_div <= 1'b0;
+        end else begin
+            start_add <= 1'b0;
+            start_mul <= 1'b0;
+            start_div <= 1'b0;
+            done <= 1'b0;
+
+            case (state)
+                S_IDLE: begin
+                    busy <= 1'b0;
+                    if (start) begin
+                        busy <= 1'b1;
+                        err_div_by_zero <= 1'b0;
+                        case (opcode)
+                            2'b00, 2'b01: begin
+                                start_add <= 1'b1;
+                                state <= S_RUN;
+                            end
+                            2'b10: begin
+                                start_mul <= 1'b1;
+                                state <= S_RUN;
+                            end
+                            2'b11: begin
+                                start_div <= 1'b1;
+                                state <= S_RUN;
+                            end
+                        endcase
+                    end
+                end
+
+                S_RUN: begin
+                    if ((opcode == 2'b00 || opcode == 2'b01) && add_done) begin
+                        result <= {{WIDTH{1'b0}}, add_res};
+                        busy <= 1'b0;
+                        done <= 1'b1;
+                        state <= S_FIN;
+                    end else if (opcode == 2'b10 && mul_done) begin
+                        result <= mul_prod;
+                        busy <= 1'b0;
+                        done <= 1'b1;
+                        state <= S_FIN;
+                    end else if (opcode == 2'b11 && div_done) begin
+                        result <= {{WIDTH{1'b0}}, div_q};
+                        err_div_by_zero <= div_dz;
+                        busy <= 1'b0;
+                        done <= 1'b1;
+                        state <= S_FIN;
+                    end
+                end
+
+                S_FIN: begin
+                    state <= S_IDLE;
+                end
+            endcase
+        end
+    end
+endmodule

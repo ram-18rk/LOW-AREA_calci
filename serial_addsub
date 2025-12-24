@@ -1,0 +1,62 @@
+`timescale 1ns / 1ps
+module serial_addsub #(
+    parameter WIDTH = 32
+)(
+    input  wire                 clk,
+    input  wire                 rst,
+    input  wire                 start,
+    input  wire                 sub,
+    input  wire [WIDTH-1:0]     a_par,
+    input  wire [WIDTH-1:0]     b_par,
+    output reg  [WIDTH-1:0]     result,
+    output reg                  busy,
+    output reg                  done,
+    output reg                  carry_out
+);
+
+    reg [WIDTH-1:0] a_sh, b_sh;
+    reg [$clog2(WIDTH)-1:0] pos;
+    reg carry;
+    reg sbit;
+    reg next_carry;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            busy <= 0;
+            done <= 0;
+            result <= 0;
+            a_sh <= 0;
+            b_sh <= 0;
+            pos <= 0;
+            carry <= 0;
+            carry_out <= 0;
+        end else begin
+            done <= 0;
+            if (start && !busy) begin
+                a_sh <= a_par;
+                b_sh <= sub ? ~b_par : b_par;
+                carry <= sub ? 1'b1 : 1'b0;
+                pos <= 0;
+                result <= 0;
+                busy <= 1;
+            end else if (busy) begin
+                sbit = a_sh[0] ^ b_sh[0] ^ carry;
+                next_carry = (a_sh[0] & b_sh[0]) | (a_sh[0] & carry) | (b_sh[0] & carry);
+
+                result[pos] <= sbit;
+
+                a_sh <= a_sh >> 1;
+                b_sh <= b_sh >> 1;
+                carry <= next_carry;
+
+                if (pos == WIDTH-1) begin
+                    busy <= 0;
+                    done <= 1;
+                    carry_out <= next_carry;
+                end else begin
+                    pos <= pos + 1;
+                end
+            end
+        end
+    end
+endmodule
